@@ -1,0 +1,116 @@
+name: Deploy
+
+# develop branch -> staging (automatic)
+# v* tag on main -> production (after the production reviewers approve)
+on:
+  push:
+    branches: [develop]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # lets GitHub request short-lived AWS credentials (OIDC)
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+    concurrency: deploy-${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      ECR_APP_REPO: ${{ vars.ECR_APP_REPO || 'fams-app' }}
+      ECR_WEB_REPO: ${{ vars.ECR_WEB_REPO || 'fams-web' }}
+      # Graviton (ARM) server? Set the PLATFORM variable to linux/arm64 in the GitHub environment.
+      PLATFORM: ${{ vars.PLATFORM || 'linux/amd64' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-qemu-action@v3
+        if: env.PLATFORM == 'linux/arm64'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: app
+          platforms: ${{ env.PLATFORM }}
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_APP_REPO }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: web
+          platforms: ${{ env.PLATFORM }}
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_WEB_REPO }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+
+      - name: Snapshot database (production only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          aws rds create-db-snapshot \
+            --db-instance-identifier "${{ vars.RDS_INSTANCE_ID }}" \
+            --db-snapshot-identifier "pre-${GITHUB_REF_NAME//./-}-$(date +%Y%m%d%H%M)"
+
+      - name: Upload deploy files
+        run: |
+          aws s3 cp deploy/docker-compose.yml "s3://${{ vars.DEPLOY_BUCKET }}/docker-compose.yml"
+          aws s3 cp deploy/deploy.sh "s3://${{ vars.DEPLOY_BUCKET }}/deploy.sh"
+
+      - name: Deploy on EC2 via SSM
+        env:
+          INSTANCE: ${{ vars.EC2_INSTANCE_ID }}
+          BUCKET: ${{ vars.DEPLOY_BUCKET }}
+        run: |
+          cat > params.json <<EOF
+          {
+            "commands": [
+              "set -e",
+              "aws s3 cp s3://${BUCKET}/docker-compose.yml /opt/fams/docker-compose.yml",
+              "aws s3 cp s3://${BUCKET}/deploy.sh /opt/fams/bin/deploy.sh",
+              "chmod 750 /opt/fams/bin/deploy.sh",
+              "AWS_REGION=${AWS_REGION} ECR_APP_REPO=${ECR_APP_REPO} ECR_WEB_REPO=${ECR_WEB_REPO} /opt/fams/bin/deploy.sh ${IMAGE_TAG}"
+            ],
+            "executionTimeout": ["900"]
+          }
+          EOF
+          CMD_ID=$(aws ssm send-command --instance-ids "$INSTANCE" \
+            --document-name AWS-RunShellScript \
+            --comment "LBMIS ${IMAGE_TAG::7}" \
+            --parameters file://params.json \
+            --query Command.CommandId --output text)
+          echo "SSM command: $CMD_ID"
+
+          STATUS=Pending
+          for i in $(seq 1 90); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+                       --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+          done
+
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+            --query StandardOutputContent --output text
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+            --query StandardErrorContent --output text
+          echo "Result: $STATUS"
+          test "$STATUS" = "Success"
