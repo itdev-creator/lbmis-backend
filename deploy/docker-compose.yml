@@ -1,0 +1,40 @@
+# Production/staging stack. Copied to /opt/lbmis/docker-compose.yml by each deploy.
+# ECR_REGISTRY, IMAGE_TAG, ECR_APP_REPO and ECR_WEB_REPO are exported by deploy.sh.
+name: lbmis
+
+x-app: &app
+  image: ${ECR_REGISTRY}/${ECR_APP_REPO}:${IMAGE_TAG}
+  restart: unless-stopped
+  env_file: /opt/lbmis/shared/.env
+  volumes:
+    - /opt/lbmis/shared/storage:/var/www/html/storage
+  depends_on: [redis]
+
+services:
+  app:
+    <<: *app
+
+  queue:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600"]
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+
+  web:
+    image: ${ECR_REGISTRY}/${ECR_WEB_REPO}:${IMAGE_TAG}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on: [app]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
