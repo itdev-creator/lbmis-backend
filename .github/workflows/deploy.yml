@@ -1,0 +1,119 @@
+name: Deploy
+
+# Staging deploy: runs on every push to develop, or manually from the Actions tab.
+#
+# Works on GitHub Free with a private repository:
+#   - AWS access: repository SECRETS AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+#     (IAM user github-actions-deployer, runbook Step 4.5)
+#   - Settings: repository VARIABLES (Settings -> Secrets and variables -> Actions -> Variables)
+#       AWS_REGION       e.g. ap-southeast-2
+#       EC2_INSTANCE_ID  e.g. i-0abc123def456
+#       DEPLOY_BUCKET    e.g. lbmis-deploy-staging-123456789012
+#       ECR_APP_REPO     optional, default lbmis-app
+#       ECR_WEB_REPO     optional, default lbmis-web
+#       PLATFORM         optional, linux/arm64 for a Graviton server
+# Environments are not used: GitHub Free private repositories don't have them.
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: deploy-staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-2' }}
+      ECR_APP_REPO: ${{ vars.ECR_APP_REPO || 'lbmis-app' }}
+      ECR_WEB_REPO: ${{ vars.ECR_WEB_REPO || 'lbmis-web' }}
+      PLATFORM: ${{ vars.PLATFORM || 'linux/amd64' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: AWS credentials (access key)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-qemu-action@v3
+        if: env.PLATFORM == 'linux/arm64'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: app
+          platforms: ${{ env.PLATFORM }}
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_APP_REPO }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: web
+          platforms: ${{ env.PLATFORM }}
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_WEB_REPO }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+
+      - name: Upload deploy files
+        run: |
+          aws s3 cp deploy/docker-compose.yml "s3://${{ vars.DEPLOY_BUCKET }}/docker-compose.yml"
+          aws s3 cp deploy/deploy.sh "s3://${{ vars.DEPLOY_BUCKET }}/deploy.sh"
+
+      - name: Deploy on EC2 via SSM
+        env:
+          INSTANCE: ${{ vars.EC2_INSTANCE_ID }}
+          BUCKET: ${{ vars.DEPLOY_BUCKET }}
+        run: |
+          cat > params.json <<EOF
+          {
+            "commands": [
+              "set -e",
+              "aws s3 cp s3://${BUCKET}/docker-compose.yml /opt/lbmis/docker-compose.yml",
+              "aws s3 cp s3://${BUCKET}/deploy.sh /opt/lbmis/bin/deploy.sh",
+              "chmod 750 /opt/lbmis/bin/deploy.sh",
+              "AWS_REGION=${AWS_REGION} ECR_APP_REPO=${ECR_APP_REPO} ECR_WEB_REPO=${ECR_WEB_REPO} /opt/lbmis/bin/deploy.sh ${IMAGE_TAG}"
+            ],
+            "executionTimeout": ["900"]
+          }
+          EOF
+          CMD_ID=$(aws ssm send-command --instance-ids "$INSTANCE" \
+            --document-name AWS-RunShellScript \
+            --comment "LBMIS ${IMAGE_TAG::7}" \
+            --parameters file://params.json \
+            --query Command.CommandId --output text)
+          echo "SSM command: $CMD_ID"
+
+          STATUS=Pending
+          for i in $(seq 1 90); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+                       --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+          done
+
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+            --query StandardOutputContent --output text
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
+            --query StandardErrorContent --output text
+          echo "Result: $STATUS"
+          test "$STATUS" = "Success"
