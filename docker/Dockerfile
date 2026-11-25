@@ -3,7 +3,7 @@
 #   --target web  -> nginx serving public/ and passing PHP to the app container
 
 # ---- PHP dependencies ----
-FROM composer:2 AS vendor
+FROM --platform=$BUILDPLATFORM composer:2 AS vendor
 WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --no-interaction --ignore-platform-reqs
@@ -11,11 +11,13 @@ COPY . .
 RUN composer dump-autoload --optimize --classmap-authoritative --no-dev --no-scripts
 
 # ---- Front-end assets ----
-FROM node:22-alpine AS assets
+FROM --platform=$BUILDPLATFORM node:22-alpine AS assets
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# app.css imports Flux's stylesheet from vendor/, so bring the PHP packages in
+COPY --from=vendor /app/vendor ./vendor
 RUN npm run build
 
 # ---- Application (PHP-FPM) ----

@@ -12,6 +12,8 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # creates the separate lbmis_test database used by php artisan test
+      - ./docker/dev/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
 
   redis:
     image: redis:7-alpine

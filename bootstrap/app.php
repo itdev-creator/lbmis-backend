@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\EnsureModuleAccess;
+use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,6 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // Host Nginx terminates HTTPS and forwards to the container on 127.0.0.1,
         // so trust its X-Forwarded-* headers to build https:// URLs.
         $middleware->trustProxies(at: '*');
+
+        $middleware->alias([
+            'module' => EnsureModuleAccess::class,
+            'active' => EnsureUserIsActive::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
