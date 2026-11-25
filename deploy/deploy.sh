@@ -23,6 +23,9 @@ docker compose pull
 echo "==> Migrations"
 docker compose run --rm app php artisan migrate --force
 
+echo "==> Roles and permissions"
+docker compose run --rm app php artisan lbmis:sync-permissions
+
 echo "==> Starting containers"
 docker compose up -d --remove-orphans
 
