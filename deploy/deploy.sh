@@ -26,6 +26,10 @@ docker compose run --rm app php artisan migrate --force
 echo "==> Starting containers"
 docker compose up -d --remove-orphans
 
+# lets manual "docker compose ..." commands on the server find the running images
+printf 'ECR_REGISTRY=%s\nECR_APP_REPO=%s\nECR_WEB_REPO=%s\nIMAGE_TAG=%s\n' \
+  "$ECR_REGISTRY" "$ECR_APP_REPO" "$ECR_WEB_REPO" "$IMAGE_TAG" > /opt/lbmis/.env
+
 echo "==> Health check"
 for i in $(seq 1 30); do
   if curl -fsS -o /dev/null http://127.0.0.1:8080/up; then
