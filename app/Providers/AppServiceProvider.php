@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Http\Middleware\EnsureModuleAccess;
 use App\Http\Middleware\EnsureUserIsActive;
+use App\Services\Gkash\GkashClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Middleware\Authorize;
 use Illuminate\Support\Facades\Date;
@@ -19,7 +20,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Built from config/services.php (GKASH_* settings) when first needed.
+        $this->app->bind(GkashClient::class, fn () => GkashClient::fromConfig());
     }
 
     /**

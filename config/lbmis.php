@@ -31,6 +31,7 @@ return [
                 'outlets.view', 'outlets.manage',
                 'franchisees.view', 'franchisees.manage',
                 'subscriptions.manage',
+                'payments.view',
             ],
         ],
         'admin-staff' => [
@@ -71,6 +72,16 @@ return [
         'plans.manage' => 'Manage subscription plans',
         'subscriptions.manage' => 'Assign plans to franchisees',
         'subscription.view-own' => 'View own subscription (franchise owners)',
+        'payments.view' => 'View all payments and check their status with GKash',
+        'payments.refund' => 'Refund payments through GKash',
+    ],
+
+    /*
+    | Automatic renewal of paid plans (charged with the card saved at the first payment).
+    | A failed renewal is retried once a day; after max_attempts failures the plan expires.
+    */
+    'renewals' => [
+        'max_attempts' => 3,
     ],
 
     /*

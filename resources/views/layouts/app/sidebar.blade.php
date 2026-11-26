@@ -27,7 +27,7 @@
                     @endcan
                 </flux:sidebar.group>
 
-                @canany(['users.manage', 'franchisees.view', 'plans.manage', 'departments.manage'])
+                @canany(['users.manage', 'franchisees.view', 'plans.manage', 'departments.manage', 'payments.view'])
                     <flux:sidebar.group :heading="__('Administration')" class="grid">
                         @can('franchisees.view')
                             <flux:sidebar.item icon="building-office-2" :href="route('admin.franchisees')" :current="request()->routeIs('admin.franchisees')" wire:navigate>
@@ -37,6 +37,11 @@
                         @can('users.manage')
                             <flux:sidebar.item icon="users" :href="route('admin.users')" :current="request()->routeIs('admin.users')" wire:navigate>
                                 {{ __('Users') }}
+                            </flux:sidebar.item>
+                        @endcan
+                        @can('payments.view')
+                            <flux:sidebar.item icon="banknotes" :href="route('admin.payments')" :current="request()->routeIs('admin.payments')" wire:navigate>
+                                {{ __('Payments') }}
                             </flux:sidebar.item>
                         @endcan
                         @can('plans.manage')

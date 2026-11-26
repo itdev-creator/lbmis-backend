@@ -1,8 +1,19 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
+/*
+| The scheduler container on the server runs `php artisan schedule:work`.
+*/
+
+// Charge saved cards for plans due today; expire plans that ended without renewing.
+Schedule::command('lbmis:charge-renewals')
+    ->dailyAt('09:00')
+    ->timezone('Asia/Kuala_Lumpur')
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Settle payments whose GKash callback never arrived.
+Schedule::command('lbmis:reconcile-payments')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();
