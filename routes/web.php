@@ -2,7 +2,7 @@
 
 use App\Http\Controllers\GkashController;
 use App\Http\Controllers\PaymentRedirectController;
-use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
@@ -11,7 +11,7 @@ Route::redirect('/', '/dashboard')->name('home');
 
 // GKash calls these. No session (its browser redirect arrives without our login cookie,
 // and starting a new session there would sign the user out) and no CSRF token.
-Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, ValidateCsrfToken::class])
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])
     ->prefix('payments/gkash')
     ->name('payments.gkash.')
     ->group(function () {
