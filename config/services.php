@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    /*
+    | GKash payment gateway (https://doc.gkash.my).
+    | Sandbox: https://api-staging.pay.asia   Production: https://api.gkash.my
+    | On the servers these come from SSM Parameter Store (/lbmis/<env>/GKASH_*).
+    */
+    'gkash' => [
+        'base_url' => rtrim((string) env('GKASH_BASE_URL', 'https://api-staging.pay.asia'), '/'),
+        'cid' => env('GKASH_CID'),
+        'signature_key' => env('GKASH_SIGNATURE_KEY'),
+        'timeout' => (int) env('GKASH_TIMEOUT', 30),
+    ],
+
 ];

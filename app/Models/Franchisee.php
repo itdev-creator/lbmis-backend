@@ -54,6 +54,14 @@ class Franchisee extends Model
     }
 
     /**
+     * @return HasMany<Payment, $this>
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
      * The subscription in force today: active, started, and not yet ended.
      */
     public function activeSubscription(): ?Subscription

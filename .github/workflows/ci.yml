@@ -52,6 +52,18 @@ jobs:
       - run: composer install --no-interaction --prefer-dist --no-progress
       - run: cp .env.example .env && php artisan key:generate
 
+      # Pages load the compiled CSS/JS through @vite and @fonts, so build them before testing.
+      # (app.css imports Flux's styles from vendor/, which composer install just created.)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Build front-end assets
+        run: |
+          npm ci
+          npm run build
+
       - name: Code style (Pint)
         run: vendor/bin/pint --test
 

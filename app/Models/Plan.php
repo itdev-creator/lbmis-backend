@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use Carbon\CarbonInterface;
 use Database\Factories\PlanFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 /**
  * A package franchise owners subscribe to. `modules` lists the keys from
@@ -38,6 +40,29 @@ class Plan extends Model
     public function includes(string $module): bool
     {
         return in_array($module, (array) $this->modules, true);
+    }
+
+    public function isFree(): bool
+    {
+        return (float) $this->price <= 0;
+    }
+
+    /**
+     * GKash recurringtype for this plan's billing period.
+     */
+    public function recurringType(): string
+    {
+        return $this->billing_period === 'yearly' ? 'ANNUAL' : 'MONTHLY';
+    }
+
+    /**
+     * The last day covered when a period starts on $start.
+     */
+    public function periodEnd(\DateTimeInterface $start): CarbonInterface
+    {
+        $start = Carbon::instance($start)->startOfDay();
+
+        return ($this->billing_period === 'yearly' ? $start->addYearNoOverflow() : $start->addMonthNoOverflow())->subDay();
     }
 
     public function priceLabel(): string
