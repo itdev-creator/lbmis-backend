@@ -53,8 +53,10 @@ class RenewalCharger
             if ($this->gkash->verifyResult($result)) {
                 $payment = $this->processor->apply($payment, $result, 'recurring');
             } else {
-                // The answer's signature did not check out: trust only GKash's own status query.
+                // GKash's docs show recurring-answer signatures that don't match its own formula,
+                // so if the check fails, confirm the payment with GKash's status query instead.
                 $payment = $this->reconciler->check($payment);
+                $this->keepNewCardToken($subscription, $payment, $result);
             }
         } catch (GkashException $e) {
             $payment->update(['description' => Str::limit($e->getMessage(), 250)]);
@@ -68,6 +70,28 @@ class RenewalCharger
         }
 
         return $payment;
+    }
+
+    /**
+     * The status query does not return the new epkey, but the charge answer does. That answer came
+     * back on our own HTTPS request to GKash, so once the query confirms the payment its token is kept;
+     * otherwise the next renewal would use the old, spent token.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function keepNewCardToken(Subscription $subscription, Payment $payment, array $result): void
+    {
+        $epKey = $result['epkey'] ?? null;
+
+        if ($payment->status !== PaymentStatus::Paid
+            || ! is_string($epKey) || trim($epKey) === ''
+            || strcasecmp((string) ($result['cartid'] ?? ''), $payment->cart_id) !== 0) {
+            return;
+        }
+
+        $subscription->refresh();
+        $subscription->gkash_epkey = trim($epKey);
+        $subscription->save();
     }
 
     private function recordFailure(Subscription $subscription, string $reason): void

@@ -264,7 +264,10 @@ class GkashPaymentTest extends TestCase
         $subscription = $this->dueSubscription();
 
         Http::fake([
-            '*/api/payment/submit' => Http::response(['status' => '88 - Transferred', 'signature' => 'not-valid']),
+            '*/api/payment/submit' => fn (Request $request) => Http::response([
+                'status' => '88 - Transferred', 'CID' => self::CID, 'cartid' => $request['v_cartid'],
+                'amount' => '99.00', 'currency' => 'MYR', 'epkey' => 'EPKEY-SECOND', 'signature' => 'not-valid',
+            ]),
             '*/api/payment/query' => fn (Request $request) => Http::response([
                 'CID' => self::CID, 'POID' => 'M161-PO-777', 'cartid' => $request['cartid'],
                 'amount' => '99.00', 'currency' => 'MYR', 'status' => '88 - Transferred',
@@ -274,7 +277,31 @@ class GkashPaymentTest extends TestCase
         $this->artisan('lbmis:charge-renewals')->assertSuccessful();
 
         $this->assertSame(PaymentStatus::Paid, Payment::query()->where('purpose', 'renewal')->sole()->status);
-        $this->assertTrue($subscription->fresh()?->ends_at?->isAfter(now()));
+        $subscription->refresh();
+        $this->assertTrue($subscription->ends_at?->isAfter(now()));
+        // The new card token from the charge answer is kept once the status query confirms payment.
+        $this->assertSame('EPKEY-SECOND', $subscription->gkash_epkey);
+    }
+
+    public function test_unsigned_renewal_answer_does_not_replace_the_card_if_payment_unconfirmed(): void
+    {
+        $subscription = $this->dueSubscription();
+
+        Http::fake([
+            '*/api/payment/submit' => fn (Request $request) => Http::response([
+                'status' => '88 - Transferred', 'CID' => self::CID, 'cartid' => $request['v_cartid'],
+                'amount' => '99.00', 'currency' => 'MYR', 'epkey' => 'EPKEY-FORGED', 'signature' => 'not-valid',
+            ]),
+            '*/api/payment/query' => fn (Request $request) => Http::response([
+                'CID' => self::CID, 'cartid' => $request['cartid'], 'amount' => '99.00',
+                'currency' => 'MYR', 'status' => '11 - Pending',
+            ]),
+        ]);
+
+        $this->artisan('lbmis:charge-renewals')->assertSuccessful();
+
+        $this->assertSame(PaymentStatus::Pending, Payment::query()->where('purpose', 'renewal')->sole()->status);
+        $this->assertSame('EPKEY-FIRST', $subscription->fresh()?->gkash_epkey);
     }
 
     public function test_plan_expires_after_repeated_renewal_failures(): void
